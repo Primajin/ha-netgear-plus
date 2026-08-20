@@ -1,0 +1,90 @@
+name: "CI"
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+
+jobs:
+  ruff:
+    # Lint only ran on push/pull_request originally; keep it off scheduled and manual runs.
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    name: "Ruff"
+    runs-on: "ubuntu-latest"
+    permissions:
+      contents: read
+    steps:
+        - name: "Checkout the repository"
+          uses: "actions/checkout@v6.0.2"
+
+        - name: "Set up Python"
+          uses: actions/setup-python@v6.2.0
+          with:
+            python-version: "3.12"
+            cache: "pip"
+
+        - name: "Install requirements"
+          run: python3 -m pip install -r requirements.txt
+
+        - name: "Lint"
+          run: python3 -m ruff check .
+
+        - name: "Format"
+          run: python3 -m ruff format . --check
+
+  hassfest: # https://developers.home-assistant.io/blog/2020/04/16/hassfest
+    name: "Hassfest Validation"
+    runs-on: "ubuntu-latest"
+    permissions:
+      contents: read
+    steps:
+      - name: "Checkout the repository"
+        uses: "actions/checkout@v6.0.2"
+
+      - name: "Run hassfest validation"
+        uses: "home-assistant/actions/hassfest@master"
+
+  hacs: # https://github.com/hacs/action
+    name: "HACS Validation"
+    runs-on: "ubuntu-latest"
+    permissions:
+      contents: read
+    steps:
+      - name: "Checkout the repository"
+        uses: "actions/checkout@v6.0.2"
+
+      - name: "Run HACS validation"
+        uses: "hacs/action@main"
+        with:
+          category: "integration"
+          # Remove this 'ignore' key when you have added brand images for your integration to https://github.com/home-assistant/brands
+          # ignore: "brands"
+
+  all-green:
+    name: All checks green
+    if: always()
+    needs:
+      - ruff
+      - hassfest
+      - hacs
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Fail if any required job failed or was cancelled
+        shell: bash
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "Job results: $results"
+          for r in $results; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A required job did not pass (result=$r)."
+              exit 1
+            fi
+          done
+          echo "All jobs succeeded or were skipped."
